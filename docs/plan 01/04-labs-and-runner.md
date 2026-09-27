@@ -53,9 +53,9 @@ Base path `/`; every request requires `X-Internal-Auth` (constant-time compare w
 | `GET /instances?label=owner=learn` | — | `200 [ … ]` (ops / reconciliation) |
 | `GET /healthz` | — | `200` if Docker ping succeeds |
 
-Status machine inside the runner: `STARTING → RUNNING → STOPPED | EXPIRED | FAILED`. Every transition is `POST`ed to `callbackUrl` (`http://learn:8080/internal/lab-sessions/{sessionId}/events`) with `X-Internal-Auth`; delivery is best-effort with 3 retries, and Learn polls `GET` as fallback, so the runner needs no persistence.
+Status machine inside the runner: `STARTING → RUNNING | STOPPED | FAILED`, `RUNNING → STOPPED | EXPIRED | FAILED`; `STOPPED`/`EXPIRED`/`FAILED` are terminal (`STARTING → STOPPED` is a cancel: DELETE while the image is still pulling). Every transition is `POST`ed to `callbackUrl` (`http://learn:8080/internal/lab-sessions/{sessionId}/events`) with `X-Internal-Auth`; delivery is best-effort with 3 retries, and Learn polls `GET` as fallback, so the runner needs no persistence.
 
-**Source of truth for "what is running" = Docker labels.** Every container is created with labels `ccp.owner`, `ccp.sessionId`, `ccp.expiresAt`, `ccp.userId`. On start-up the runner lists containers by label and rebuilds its in-memory table; the reaper works off `ccp.expiresAt`. No database, no file state.
+**Source of truth for "what is running" = Docker labels.** Every container is created with labels `bitforge.owner`, `bitforge.sessionId`, `bitforge.userId`, `bitforge.expiresAt` (RFC 3339), plus `bitforge.image` / `bitforge.endpoint` for display. On start-up the runner lists containers by label and rebuilds its in-memory table (`store.FromLabels` — strict: a container missing owner, session or a parsable expiry is *not* adopted and is reported for removal); the reaper works off `bitforge.expiresAt`. Client-supplied labels may not override the reserved keys. No database, no file state.
 
 ## 4. Isolation requirements (non-negotiable before L6 is "done")
 
@@ -88,7 +88,7 @@ Status machine inside the runner: `STARTING → RUNNING → STOPPED | EXPIRED | 
 
 ```
 lab-runner/
-├── go.mod                  # module github.com/cyberclub/lab-runner, Go 1.22+
+├── go.mod                  # module bitforge/lab-runner (product renamed bitForge 2026-09-27), Go 1.26
 ├── cmd/lab-runner/main.go  # flags/env → server
 ├── internal/api/           # HTTP handlers, auth middleware (X-Internal-Auth)
 ├── internal/docker/        # engine client wrapper: create/start/inspect/remove, network per session
