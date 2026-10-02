@@ -47,13 +47,15 @@ Base path `/`; every request requires `X-Internal-Auth` (constant-time compare w
 
 | Method & path | Request | Response |
 | :-- | :-- | :-- |
-| `POST /instances` | `{ sessionId, image, exposedPort, ttlSeconds, cpuMillis, memoryMb, env: {k:v}, labels: {k:v}, callbackUrl }` | `201 { instanceId, endpoint, expiresAt }` · `400` invalid · `403` image not in allowlist · `429` global capacity reached · `502` Docker error |
-| `GET /instances/{id}` | — | `200 { instanceId, status, endpoint, expiresAt, failReason }` · `404` |
-| `DELETE /instances/{id}` | — | `204` (idempotent) |
-| `GET /instances?label=owner=learn` | — | `200 [ … ]` (ops / reconciliation) |
-| `GET /healthz` | — | `200` if Docker ping succeeds |
+| `POST /instances` | `{ owner?, sessionId, userId, image, exposedPort, ttlSeconds, cpuMillis, memoryMb, egress, readOnly, env: {k:v}, labels: {k:v}, callbackUrl }` | **synchronous**: `201 { instanceId, sessionId, owner, status: RUNNING, endpoint, expiresAt }` · `502 { …status: FAILED, failReason }` when Docker refused (the instance exists and is `GET`-able) · `400` invalid JSON / unknown field / semantic error / second active instance for the session · `403` image not in allowlist · `429` global capacity reached. `ttlSeconds` above `LAB_MAX_TTL_SECONDS` is clamped, not rejected. Client labels may not use reserved `bitforge.*` keys. |
+| `GET /instances/{id}` | — | `200 { instanceId, status, endpoint, expiresAt, failReason }` · `404`. Terminal instances stay queryable for ~10 min, then vanish. |
+| `DELETE /instances/{id}` | — | `204` (idempotent: unknown / already terminal → 204) · `502` Docker could not remove (record stays RUNNING; reaper retries) |
+| `GET /instances?label=owner=learn` | — | `200 [ … ]` (ops / reconciliation). Short names `owner`, `sessionId`, `userId` expand to the `bitforge.*` keys. |
+| `GET /healthz` | — | `200` if Docker ping succeeds, `503` otherwise. **Unauthenticated** (probes have no secret). |
 
-Status machine inside the runner: `STARTING → RUNNING | STOPPED | FAILED`, `RUNNING → STOPPED | EXPIRED | FAILED`; `STOPPED`/`EXPIRED`/`FAILED` are terminal (`STARTING → STOPPED` is a cancel: DELETE while the image is still pulling). Every transition is `POST`ed to `callbackUrl` (`http://learn:8080/internal/lab-sessions/{sessionId}/events`) with `X-Internal-Auth`; delivery is best-effort with 3 retries, and Learn polls `GET` as fallback, so the runner needs no persistence.
+All `/instances*` routes: missing/wrong `X-Internal-Auth` → `401` (constant-time compare; an empty configured secret rejects everything).
+
+Status machine inside the runner: `STARTING → RUNNING | STOPPED | FAILED`, `RUNNING → STOPPED | EXPIRED | FAILED`; `STOPPED`/`EXPIRED`/`FAILED` are terminal (`STARTING → STOPPED` is a cancel: DELETE while the image is still pulling). Every transition is `POST`ed to `callbackUrl` (`http://learn:8080/internal/lab-sessions/{sessionId}/events`) with `X-Internal-Auth`, body `{ instanceId, sessionId, status, endpoint?, failReason?, expiresAt, at }`; delivery is best-effort with 3 retries (exponential back-off from 500 ms; 5xx/transport errors retry, 4xx does not), and Learn polls `GET` as fallback, so the runner needs no persistence. Callback URLs are held in memory only (never in labels — they may carry secrets), so instances adopted after a runner restart send no callbacks; Learn's reconciler covers that.
 
 **Source of truth for "what is running" = Docker labels.** Every container is created with labels `bitforge.owner`, `bitforge.sessionId`, `bitforge.userId`, `bitforge.expiresAt` (RFC 3339), plus `bitforge.image` / `bitforge.endpoint` for display. On start-up the runner lists containers by label and rebuilds its in-memory table (`store.FromLabels` — strict: a container missing owner, session or a parsable expiry is *not* adopted and is reported for removal); the reaper works off `bitforge.expiresAt`. Client-supplied labels may not override the reserved keys. No database, no file state.
 
