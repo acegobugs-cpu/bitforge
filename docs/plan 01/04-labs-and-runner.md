@@ -62,9 +62,9 @@ Status machine inside the runner: `STARTING → RUNNING | STOPPED | FAILED`, `RU
 | Control | Setting |
 | :-- | :-- |
 | Image allowlist | `LAB_IMAGE_ALLOWLIST` (prefix list, e.g. `ghcr.io/cyberclub/labs/`); Learn additionally only passes `labs.image_ref` values |
-| Privileges | `--cap-drop ALL`, `--security-opt no-new-privileges`, non-root user if the image allows, `--read-only` + `tmpfs /tmp` when the lab permits |
+| Privileges | `--cap-drop ALL`, `--security-opt no-new-privileges`, `--read-only` + `tmpfs /tmp` when the lab permits. **Consequence for lab authors (verified 2026-10-02):** the image must already run as a non-root user and listen on a port ≥ 1024 — with every capability dropped a root entrypoint cannot `setuid` to a service user nor bind ports < 1024 (stock `nginx:alpine` exits immediately; `nginxinc/nginx-unprivileged` works). The runner does not add capabilities back. |
 | Resources | `--cpus`, `--memory`, `--memory-swap = memory`, `--pids-limit 256`, `--ulimit nofile` |
-| Network | one bridge network **per session** (`ccp-<sessionId>`), `--publish 127.0.0.1::<exposedPort>` → runner then exposes it via `LAB_PUBLIC_HOST:<hostPort>`; no access to `app-network`; egress blocked by default (`--internal` network) unless the lab declares `egress: true` |
+| Network | one bridge network **per session** (`bitforge-<sessionId>`), `--publish 127.0.0.1::<exposedPort>` → runner then exposes it via `LAB_PUBLIC_HOST:<hostPort>`; no access to `app-network`; **egress blocked by default by disabling IP masquerade on the session bridge** (`com.docker.network.bridge.enable_ip_masquerade=false`) unless the lab declares `egress: true`. *Not* `--internal`: verified 2026-10-02 that Docker silently skips port publishing on internal networks (`inspect` shows `"80/tcp": null`), so the learner could never reach the lab. |
 | Docker socket | mounted **only** into `lab-runner`; never into a lab container |
 | TTL | hard stop at `expiresAt` regardless of activity; `LAB_MAX_TTL_SECONDS` caps requests |
 | Capacity | `LAB_MAX_INSTANCES` global; Learn enforces 1 active session per user |

@@ -105,8 +105,11 @@ func TestContainerConfig(t *testing.T) {
 
 func TestNetworkCreate(t *testing.T) {
 	nc := networkCreate(baseSpec())
-	if nc.Driver != "bridge" || !nc.Internal {
-		t.Errorf("default network must be an internal bridge (no egress): %+v", nc)
+	if nc.Driver != "bridge" || nc.Internal {
+		t.Errorf("must be a plain bridge, never --internal (internal networks do not publish ports): %+v", nc)
+	}
+	if nc.Options[optMasquerade] != "false" {
+		t.Errorf("default (no egress) must disable IP masquerade: %v", nc.Options)
 	}
 	if nc.Labels[LabelManaged] != LabelManagedValue || nc.Labels[store.LabelSessionID] != "sess-1" {
 		t.Errorf("network labels must carry the marker and session so it is reaped with the container: %v", nc.Labels)
@@ -114,8 +117,8 @@ func TestNetworkCreate(t *testing.T) {
 
 	eg := baseSpec()
 	eg.Egress = true
-	if networkCreate(eg).Internal {
-		t.Error("Egress=true must not create an internal network")
+	if _, set := networkCreate(eg).Options[optMasquerade]; set {
+		t.Error("Egress=true must leave masquerade at its default (on)")
 	}
 }
 

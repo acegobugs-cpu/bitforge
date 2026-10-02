@@ -4,7 +4,9 @@
 package docker
 
 // Runs against the local Docker daemon:  go test -tags integration ./internal/docker
-// Pulls docker.io/library/nginx:alpine on first run.
+// Pulls nginxinc/nginx-unprivileged:alpine on first run. The stock nginx image
+// cannot be used: under --cap-drop ALL it needs CAP_SETUID/NET_BIND_SERVICE and
+// exits immediately — labs must run as non-root on a port >= 1024 (plan §4).
 
 import (
 	"context"
@@ -35,8 +37,8 @@ func TestClientLifecycle(t *testing.T) {
 	sessionID := fmt.Sprintf("it-%d", time.Now().UnixNano())
 	spec := CreateSpec{
 		SessionID:   sessionID,
-		Image:       "nginx:alpine",
-		ExposedPort: 80,
+		Image:       "nginxinc/nginx-unprivileged:alpine",
+		ExposedPort: 8080,
 		CPUMillis:   500,
 		MemoryMB:    128,
 		Egress:      false,
@@ -63,7 +65,7 @@ func TestClientLifecycle(t *testing.T) {
 		t.Fatalf("Start returned port %d", port)
 	}
 
-	// the network is internal (no egress) and carries our labels
+	// the network is a plain bridge with masquerade off (no egress) and carries our labels
 	nets, err := c.api.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -72,8 +74,11 @@ func TestClientLifecycle(t *testing.T) {
 	for _, n := range nets.Items {
 		if n.Name == networkName(sessionID) {
 			found = true
-			if !n.Internal {
-				t.Error("network must be internal by default")
+			if n.Internal {
+				t.Error("network must not be --internal (ports would not publish)")
+			}
+			if n.Options[optMasquerade] != "false" {
+				t.Errorf("masquerade must be off by default, options=%v", n.Options)
 			}
 			if n.Labels[LabelManaged] != LabelManagedValue {
 				t.Error("network missing managed label")

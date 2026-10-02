@@ -46,20 +46,20 @@ func normalizeRef(ref string) string {
 	if ref == "" {
 		return ""
 	}
-	first := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		first = ref[:i]
+	// Split the reference into the first component and the rest.
+	first, rest, hasSlash := strings.Cut(ref, "/")
+	if !hasSlash {
+		// "alpine", "alpine:3.20", "alpine@sha256:…" — a bare Hub image; the colon
+		// here is a tag, not a registry port.
+		return "docker.io/library/" + ref
 	}
 	// A registry host has a dot or a colon (port), or is "localhost".
 	hasRegistry := strings.ContainsAny(first, ".:") || first == "localhost"
 	if !hasRegistry {
-		if !strings.Contains(ref, "/") {
-			return "docker.io/library/" + ref
-		}
 		return "docker.io/" + ref
 	}
-	if strings.HasPrefix(ref, "index.docker.io/") {
-		ref = "docker.io/" + strings.TrimPrefix(ref, "index.docker.io/")
+	if first == "index.docker.io" {
+		return "docker.io/" + rest
 	}
 	return ref
 }

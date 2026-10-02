@@ -2,7 +2,6 @@ package docker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 )
@@ -37,8 +36,6 @@ type fakeContainer struct {
 	labels  map[string]string
 }
 
-var ErrFakeNotFound = errors.New("fake engine: no such container")
-
 func NewFakeEngine() *FakeEngine {
 	return &FakeEngine{containers: map[string]*fakeContainer{}, StartPort: 32768}
 }
@@ -64,7 +61,7 @@ func (f *FakeEngine) Start(_ context.Context, id string) (int, error) {
 	}
 	c, ok := f.containers[id]
 	if !ok {
-		return 0, ErrFakeNotFound
+		return 0, ErrNotFound
 	}
 	c.running = true
 	return f.StartPort, nil
@@ -78,7 +75,7 @@ func (f *FakeEngine) Inspect(_ context.Context, id string) (bool, error) {
 	}
 	c, ok := f.containers[id]
 	if !ok {
-		return false, ErrFakeNotFound
+		return false, ErrNotFound // same sentinel as the real client
 	}
 	return c.running, nil
 }

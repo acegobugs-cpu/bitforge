@@ -108,12 +108,22 @@ func hostConfig(spec CreateSpec) *container.HostConfig {
 	}
 }
 
+// Egress is blocked by turning off IP masquerade on the session's bridge, NOT
+// with Docker's `--internal` flag: internal networks silently skip port
+// publishing (inspect shows "80/tcp": null), so the learner could never reach
+// the lab. Without masquerade the container keeps its published port (DNAT in)
+// but has no NAT out, so connections to the internet time out.
+const optMasquerade = "com.docker.network.bridge.enable_ip_masquerade"
+
 func networkCreate(spec CreateSpec) client.NetworkCreateOptions {
-	return client.NetworkCreateOptions{
-		Driver:   "bridge",
-		Internal: !spec.Egress,
-		Labels:   managedLabels(spec),
+	opts := client.NetworkCreateOptions{
+		Driver: "bridge",
+		Labels: managedLabels(spec),
 	}
+	if !spec.Egress {
+		opts.Options = map[string]string{optMasquerade: "false"}
+	}
+	return opts
 }
 
 func hostPortOf(inspect container.InspectResponse, exposedPort int) (int, error) {
