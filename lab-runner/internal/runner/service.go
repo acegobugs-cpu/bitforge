@@ -397,3 +397,30 @@ func (s *Service) finish(ctx context.Context, id string, next store.Status, muta
 	s.log.Info("instance "+string(next), "instance", inst.ID, "session", inst.SessionID, "owner", inst.Owner)
 	return inst, nil
 }
+
+/*
+1. The package comment at the top of service.go. It lists the five verbs and says every state change goes through finish(). Hold onto that; it's the whole design.
+
+2. The types (Event, Notifier, Limits, Request). Request is the HTTP body after JSON parsing and before anything Docker-ish — the runner never sees net/http. Notifier is the callback-POST seam; tests plug a channel in, step 4 plugs in real HTTP. Limits are the LAB_* env vars.
+
+3. Create — the only long function. Read it as five beats:
+
+validate (shape, reserved labels, one active instance per session) → allowlist → capacity;
+reserve the slot first: store.Put(STARTING) before touching Docker — otherwise ten requests all pass the capacity check during one slow image pull;
+engine.Create → on failure finish(FAILED);
+rekey: the store record moves from a provisional pending-… id to the container id, so Rebuild (which only has container ids) finds the same record later;
+engine.Start → finish(RUNNING, endpoint) or remove-and-finish(FAILED).
+Note it returns a FAILED instance, not an error — a Docker failure is a fact about the instance the client must be told, not a 500.
+4. Stop / Expire → tearDown. Same mechanics, different terminal state (so Learn can distinguish "learner clicked stop" from "TTL ran out"). Idempotent: unknown or already-terminal ids return nil. If Remove fails, the record stays RUNNING on purpose — the reaper retries next tick rather than leaking a container.
+
+5. ReapOnce / Reconcile / Rebuild — the three maintenance verbs:
+
+ReapOnce: store.Expired() → Expire each; logs and continues past a stuck one.
+Reconcile: catches containers that died on their own (crash, OOM) → FAILED "container exited", or vanished behind our back → FAILED "container vanished"; also forgets terminal records older than keepTerminal so memory is bounded.
+Rebuild (start-up): ListManaged → adopt RUNNING ones via store.FromLabels; remove exited or unattributable ones — a dead lab is useless, and we must never keep a container we can't expire.
+6. finish() at the bottom — transition in the store, then notify the client. Written once, so the order can't be wrong anywhere.
+
+7. reaper.go is just when: a ticker, a select, Tick() calls ReapOnce then Reconcile. Tick is public so tests drive it with a frozen clock.
+
+8. service_test.go — start with newRig: a FakeEngine, a frozen r.now the store reads, a channel Notifier. After that each test reads as a sentence: "capacity reached → ErrCapacity; stop one → slot free", "start fails → container removed, record FAILED, client told", "advance clock 11m → exactly one reaped", "crashed container → FAILED; terminal records vanish after keepTerminal", "rebuild adopts the running one, removes the dead and the unlabelled".
+*/
